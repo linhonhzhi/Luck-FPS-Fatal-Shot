@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>命運射擊：歐皇苦力怕大戰 (Luck FPS)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js 3D 引擎 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            user-select: none;
+            background: #05050a;
+            font-family: sans-serif;
+        }
+
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 16px;
+            height: 16px;
+            pointer-events: none;
+            z-index: 20;
+        }
+
+        #crosshair::before,
+        #crosshair::after {
+            content: '';
+            position: absolute;
+            background: rgba(0, 255, 204, 0.9);
+            box-shadow: 0 0 8px rgba(0, 255, 204, 0.8);
+        }
+
+        #crosshair::before {
+            top: 7px;
+            left: 0;
+            width: 16px;
+            height: 2px;
+        }
+
+        #crosshair::after {
+            top: 0;
+            left: 7px;
+            width: 2px;
+            height: 16px;
+        }
+
+        .hud-panel {
+            background: rgba(10, 15, 30, 0.85);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 255, 204, 0.4);
+            box-shadow: 0 0 20px rgba(0, 255, 204, 0.2);
+        }
+
+        @keyframes popText {
+            0% {
+                transform: translate(-50%, -50%) scale(0.4);
+                opacity: 0;
+            }
+
+            40% {
+                transform: translate(-50%, -80%) scale(1.4);
+                opacity: 1;
+            }
+
+            100% {
+                transform: translate(-50%, -130%) scale(1);
+                opacity: 0;
+            }
+        }
+
+        .rng-popup {
+            position: absolute;
+            left: 50%;
+            top: 38%;
+            animation: popText 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+            pointer-events: none;
+            font-weight: 900;
+            z-index: 30;
+            text-shadow: 0 0 15px rgba(0, 0, 0, 0.9);
+        }
+
+        @keyframes damageFlash {
+            0% {
+                transform: scale(1);
+                box-shadow: inset 0 0 0px rgba(255, 0, 0, 0);
+            }
+
+            50% {
+                transform: scale(1.02);
+                box-shadow: inset 0 0 120px rgba(255, 0, 85, 0.8);
+            }
+
+            100% {
+                transform: scale(1);
+                box-shadow: inset 0 0 0px rgba(255, 0, 0, 0);
+            }
+        }
+
+        .flash-red {
+            animation: damageFlash 0.35s ease;
+        }
+    </style>
+</head>
+
+<body id="body-container">
+
+    <!-- 遊戲 HUD -->
+    <div id="hud" class="hidden absolute inset-0 pointer-events-none z-10 flex flex-col justify-between p-6">
+        <div id="crosshair"></div>
+
+        <!-- 頂部資訊區 -->
+        <div class="flex justify-between items-start">
+            <div class="hud-panel p-4 rounded-xl flex gap-6 text-white">
+                <div>
+                    <div class="text-xs text-cyan-400 font-bold uppercase tracking-wider">血量 HP</div>
+                    <div id="hp-text" class="text-2xl font-black text-emerald-400">100 / 100</div>
+                </div>
+                <div class="border-l border-slate-700 pl-6">
+                    <div class="text-xs text-amber-400 font-bold uppercase tracking-wider">籌碼金幣</div>
+                    <div id="chips-text" class="text-2xl font-black text-amber-300">$1,000</div>
+                </div>
+                <div class="border-l border-slate-700 pl-6">
+                    <div class="text-xs text-purple-400 font-bold uppercase tracking-wider">當前武器</div>
+                    <div id="weapon-text" class="text-2xl font-black text-purple-300">🎲 命運手槍</div>
+                </div>
+                <div class="border-l border-slate-700 pl-6">
+                    <div class="text-xs text-pink-400 font-bold uppercase tracking-wider">歐皇連擊</div>
+                    <div id="combo-text" class="text-2xl font-black text-pink-400">0 COMBO</div>
+                </div>
+            </div>
+
+            <!-- 波次與敵軍 + 武器列表面板 -->
+            <div class="flex flex-col gap-2 items-end">
+                <div class="hud-panel p-4 rounded-xl text-right text-white">
+                    <div class="text-xs text-pink-400 font-bold uppercase tracking-wider">敵軍波次 WAVE</div>
+                    <div id="wave-text" class="text-3xl font-black text-pink-500">1</div>
+                    <div class="text-xs text-slate-400 mt-1">剩餘苦力怕: <span id="zombies-left"
+                            class="text-white font-bold">0</span></div>
+                </div>
+                <!-- 武器資料庫列表 -->
+                <div class="hud-panel p-3 rounded-xl text-left text-xs text-slate-300 w-56">
+                    <div class="font-bold text-amber-400 mb-1 border-b border-slate-700 pb-1">📜 傳說武器列表</div>
+                    <div>• 🎲 命運手槍 (基礎)</div>
+                    <div>• ⚡ 黃金加特林 (高射速)</div>
+                    <div>• 🚀 核爆火箭筒 (超高傷)</div>
+                    <div>• 🎲 量子骰子槍 (隨機傷)</div>
+                    <div>• 💥 毀滅脈衝砲 (強力光束)</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 波次間隔倒數提示 -->
+        <div id="wave-countdown" class="hidden absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div class="hud-panel px-8 py-6 rounded-2xl text-center border-2 border-cyan-400 animate-pulse">
+                <div class="text-2xl font-extrabold text-emerald-400 mb-1">🎉 苦力怕已全數清空！</div>
+                <div class="text-amber-300 text-lg font-bold">下一波將在 <span id="countdown-sec"
+                        class="text-3xl font-black text-cyan-300">3</span> 秒後降臨...</div>
+                <div class="text-xs text-slate-400 mt-2">快利用時間去轉動輪盤機或開神秘箱補給！</div>
+            </div>
+        </div>
+
+        <!-- 底部互動提示 -->
+        <div class="flex justify-between items-end">
+            <div class="hud-panel p-3 rounded-lg text-xs text-slate-300 max-w-md">
+                <div class="font-bold text-cyan-300 mb-1">🎮 操作指南 (紅心補血包 + 跳躍)</div>
+                <p>• [WASD] 移動 | [空白] 跳躍 | [Shift] 跑步 | [滑鼠左鍵] 開槍</p>
+                <p>• [E] 消耗 $500 開神秘箱 | [F] 消耗 $300 轉動輪盤機</p>
+            </div>
+
+            <div id="msg-box"
+                class="hud-panel px-6 py-3 rounded-xl text-amber-300 font-bold text-lg hidden animate-bounce">
+                按 [E] 開啟歐皇神秘箱 ($500) | 按 [F] 轉動命運輪盤 ($300)
+            </div>
+        </div>
+    </div>
+
+    <!-- 遊戲主選單 -->
+    <div id="menu"
+        class="absolute inset-0 bg-slate-950/90 backdrop-blur-md z-40 flex flex-col items-center justify-center p-6 text-white">
+        <div class="max-w-xl text-center">
+            <h1
+                class="text-4xl md:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-cyan-400 to-amber-400 mb-3 tracking-wider">
+                💥 歐皇射擊：苦力怕大戰
+            </h1>
+            <p class="text-slate-300 text-sm md:text-base mb-6">
+                血量低於 30 時將會掉落<span class="text-red-500 font-bold">紅色愛心補血包</span>！<br>
+                快來挑戰極限歐皇戰！
+            </p>
+
+            <div class="grid grid-cols-2 gap-4 mb-8 text-left bg-slate-900/80 p-4 rounded-xl border border-slate-800">
+                <div class="p-3 bg-slate-800/50 rounded-lg">
+                    <div class="text-amber-400 font-bold text-sm">🎰 命運輪盤機 [F]</div>
+                    <div class="text-xs text-slate-400 mt-1">隨機抽中核爆清場、無敵護盾、發財大獎或直接破產！</div>
+                </div>
+                <div class="p-3 bg-slate-800/50 rounded-lg">
+                    <div class="text-cyan-400 font-bold text-sm">🎁 神秘箱抽武 [E]</div>
+                    <div class="text-xs text-slate-400 mt-1">抽取黃金加特林、核爆火箭筒與量子骰子槍。</div>
+                </div>
+            </div>
+
+            <button id="start-btn"
+                class="px-10 py-4 bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-black text-xl rounded-2xl shadow-lg shadow-cyan-500/30 transition-all transform hover:scale-105 cursor-pointer">
+                進入戰場（點擊鎖定滑鼠）
+            </button>
+
+            <div id="game-over-stats" class="mt-6 text-sm text-red-400 hidden">
+                ☠️ 歐皇隕落！最終波次：<span id="final-wave" class="font-bold">0</span> | 總擊殺：<span id="final-kills"
+                    class="font-bold">0</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 遊戲腳本 -->
+    <script>
+        let scene, camera, renderer;
+        let controlsEnabled = false;
+        let hp = 100, chips = 1000, wave = 1, kills = 0, combo = 0;
+        let isShielded = false, shieldTimer = null, isWaveTransitioning = false;
+        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false, canJump = false, isSprinting = false;
+        let prevTime = performance.now();
+        let velocity = new THREE.Vector3(), direction = new THREE.Vector3();
+
+        let zombies = [], bullets = [], obstacles = [], mysteryBox, rouletteMachine, weaponModel;
+        let medKit = null; // 紅色愛心補血包物件
+        let currentWeapon = { id: 'pistol', name: '🎲 命運手槍', damage: 35, fireRate: 300, color: 0x00ffcc };
+        let lastShootTime = 0;
+        let weaponRecoil = 0;
+
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playSound(freq, duration, type = 'sine', vol = 0.12) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + duration);
+        }
+
+        function createCreeperTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128; canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#48b848';
+            ctx.fillRect(0, 0, 128, 128);
+
+            for (let i = 0; i < 128; i += 16) {
+                for (let j = 0; j < 128; j += 16) {
+                    if (Math.random() > 0.5) {
+                        ctx.fillStyle = '#3ca03c';
+                        ctx.fillRect(i, j, 16, 16);
+                    }
+                }
+            }
+
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(20, 28, 28, 28);
+            ctx.fillRect(80, 28, 28, 28);
+            ctx.fillRect(48, 56, 32, 44);
+            ctx.fillRect(34, 70, 14, 42);
+            ctx.fillRect(80, 70, 14, 42);
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        const creeperTexture = createCreeperTexture();
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x060812);
+            scene.fog = new THREE.FogExp2(0x060812, 0.03);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            resetPlayerPosition();
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+            const dirLight = new THREE.DirectionalLight(0x77bbff, 0.9);
+            dirLight.position.set(20, 50, 20);
+            scene.add(dirLight);
+
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), new THREE.MeshStandardMaterial({ color: 0x0d111a }));
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+
+            const grid = new THREE.GridHelper(120, 60, 0x00ffcc, 0x1a2638);
+            grid.position.y = 0.01;
+            scene.add(grid);
+
+            createEnvironment();
+            updateWeaponModel();
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.body.appendChild(renderer.domElement);
+
+            setupControls();
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        function resetPlayerPosition() {
+            camera.position.set(0, 1.7, 0);
+            camera.rotation.set(0, 0, 0);
+            velocity.set(0, 0, 0);
+        }
+
+        function updateWeaponModel() {
+            if (weaponModel) camera.remove(weaponModel);
+            weaponModel = new THREE.Group();
+
+            let bodyGeo, bodyMat, barrelGeo, barrelMat;
+
+            if (currentWeapon.id === 'gatling') {
+                bodyMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, metalness: 0.9, roughness: 0.1 });
+                bodyGeo = new THREE.BoxGeometry(0.4, 0.4, 1.5);
+                barrelMat = new THREE.MeshStandardMaterial({ color: 0x78350f, metalness: 0.8 });
+                barrelGeo = new THREE.CylinderGeometry(0.04, 0.04, 1.0);
+            } else if (currentWeapon.id === 'bazooka') {
+                bodyMat = new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.4 });
+                bodyGeo = new THREE.BoxGeometry(0.5, 0.5, 1.8);
+                barrelMat = new THREE.MeshStandardMaterial({ color: 0x1e293b });
+                barrelGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.8);
+            } else if (currentWeapon.id === 'dice') {
+                bodyMat = new THREE.MeshStandardMaterial({ color: 0xa855f7, emissive: 0x581c87, roughness: 0.3 });
+                bodyGeo = new THREE.BoxGeometry(0.35, 0.35, 1.1);
+                barrelMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6 });
+                barrelGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.5);
+            } else if (currentWeapon.id === 'pulse') {
+                bodyMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6, metalness: 0.7, roughness: 0.2 });
+                bodyGeo = new THREE.BoxGeometry(0.4, 0.4, 1.3);
+                barrelMat = new THREE.MeshStandardMaterial({ color: 0x60a5fa, emissive: 0x1d4ed8 });
+                barrelGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.6);
+            } else {
+                bodyMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.8, roughness: 0.2 });
+                bodyGeo = new THREE.BoxGeometry(0.3, 0.3, 1.1);
+                barrelMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.9 });
+                barrelGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.5);
+            }
+
+            const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
+            bodyMesh.position.set(0.4, -0.4, -0.8);
+            weaponModel.add(bodyMesh);
+
+            const barrelMesh = new THREE.Mesh(barrelGeo, barrelMat);
+            barrelMesh.rotation.x = Math.PI / 2;
+            barrelMesh.position.set(0.4, -0.35, -1.35);
+            weaponModel.add(barrelMesh);
+
+            camera.add(weaponModel);
+            scene.add(camera);
+        }
+
+        function createEnvironment() {
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0x141b2d });
+
+            const wN = new THREE.Mesh(new THREE.BoxGeometry(120, 12, 2), wallMat); wN.position.set(0, 6, -60); scene.add(wN); obstacles.push(wN);
+            const wS = new THREE.Mesh(new THREE.BoxGeometry(120, 12, 2), wallMat); wS.position.set(0, 6, 60); scene.add(wS); obstacles.push(wS);
+            const wE = new THREE.Mesh(new THREE.BoxGeometry(120, 12, 2), wallMat); wE.rotation.y = Math.PI / 2; wE.position.set(60, 6, 0); scene.add(wE); obstacles.push(wE);
+            const wW = new THREE.Mesh(new THREE.BoxGeometry(120, 12, 2), wallMat); wW.rotation.y = Math.PI / 2; wW.position.set(-60, 6, 0); scene.add(wW); obstacles.push(wW);
+
+            mysteryBox = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshStandardMaterial({ color: 0xf59e0b, emissive: 0xb45309 }));
+            mysteryBox.position.set(-10, 1, -15);
+            scene.add(mysteryBox); obstacles.push(mysteryBox);
+            scene.add(new THREE.PointLight(0xf59e0b, 2, 8).translateOnAxis(new THREE.Vector3(-10, 3, -15), 1));
+
+            rouletteMachine = new THREE.Mesh(new THREE.BoxGeometry(2.5, 3, 2), new THREE.MeshStandardMaterial({ color: 0xec4899, emissive: 0xbe185d }));
+            rouletteMachine.position.set(10, 1.5, -15);
+            scene.add(rouletteMachine); obstacles.push(rouletteMachine);
+            scene.add(new THREE.PointLight(0xec4899, 2, 8).translateOnAxis(new THREE.Vector3(10, 4, -15), 1));
+
+            for (let i = 0; i < 20; i++) {
+                const b = new THREE.Mesh(new THREE.BoxGeometry(3, 3, 3), new THREE.MeshStandardMaterial({ color: 0x1e293b }));
+                b.position.set((Math.random() - 0.5) * 90, 1.5, (Math.random() - 0.5) * 90);
+                scene.add(b);
+                obstacles.push(b);
+            }
+        }
+
+        function setupControls() {
+            document.getElementById('start-btn').addEventListener('click', () => document.body.requestPointerLock());
+
+            document.addEventListener('pointerlockchange', () => {
+                const locked = document.pointerLockElement === document.body;
+                controlsEnabled = locked;
+                document.getElementById('menu').classList.toggle('hidden', locked);
+                document.getElementById('hud').classList.toggle('hidden', !locked);
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!controlsEnabled) return;
+                camera.rotation.y -= e.movementX * 0.002;
+                camera.rotation.x = 0;
+            });
+
+            document.addEventListener('keydown', (e) => {
+                if (!controlsEnabled) return;
+                if (e.code === 'KeyW') moveForward = true;
+                if (e.code === 'KeyS') moveBackward = true;
+                if (e.code === 'KeyA') moveLeft = true;
+                if (e.code === 'KeyD') moveRight = true;
+                if (e.code === 'Space' && canJump) { velocity.y = 10; canJump = false; }
+                if (e.code === 'ShiftLeft') isSprinting = true;
+                if (e.code === 'KeyE') interactBox();
+                if (e.code === 'KeyF') spinRouletteMachine();
+            });
+
+            document.addEventListener('keyup', (e) => {
+                if (e.code === 'KeyW') moveForward = false;
+                if (e.code === 'KeyS') moveBackward = false;
+                if (e.code === 'KeyA') moveLeft = false;
+                if (e.code === 'KeyD') moveRight = false;
+                if (e.code === 'ShiftLeft') isSprinting = false;
+            });
+
+            document.addEventListener('mousedown', (e) => {
+                if (controlsEnabled && e.button === 0) shoot();
+            });
+        }
+
+        function shoot() {
+            const now = Date.now();
+            if (now - lastShootTime < currentWeapon.fireRate) return;
+            lastShootTime = now;
+
+            playSound(250, 0.08, 'sawtooth');
+            weaponRecoil = 0.15;
+
+            let dmgMult = 1, color = currentWeapon.color, msg = '';
+            const roll = Math.random();
+
+            if (currentWeapon.name.includes('量子骰子')) {
+                currentWeapon.damage = Math.floor(Math.random() * 400) + 20;
+            }
+
+            if (roll < 0.12) { dmgMult = 0; msg = '❌ 彈道啞火 (0x)'; playSound(90, 0.15, 'square'); }
+            else if (roll < 0.28) { dmgMult = 10; color = 0xff0055; msg = '🔥 10倍歐皇爆擊！'; playSound(850, 0.3, 'sine'); }
+            else if (roll < 0.38) { hp = Math.min(100, hp + 15); msg = '💖 吸血彈 (+15HP)'; playSound(600, 0.2, 'triangle'); }
+
+            if (msg) showPopup(msg);
+
+            const bullet = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), new THREE.MeshBasicMaterial({ color }));
+            bullet.position.copy(camera.position);
+            bullet.damage = currentWeapon.damage * dmgMult;
+
+            const dir = new THREE.Vector3();
+            camera.getWorldDirection(dir);
+            bullet.velocity = dir.multiplyScalar(2.5);
+            bullet.life = 0;
+
+            bullets.push(bullet);
+            scene.add(bullet);
+        }
+
+        function showPopup(text) {
+            const el = document.createElement('div');
+            el.className = 'rng-popup text-2xl text-amber-300';
+            el.innerText = text;
+            document.body.appendChild(el);
+            setTimeout(() => el.remove(), 800);
+        }
+
+        function interactBox() {
+            if (camera.position.distanceTo(mysteryBox.position) < 4.5) {
+                if (chips >= 500) {
+                    chips -= 500;
+                    playSound(550, 0.4, 'sine');
+                    const weapons = [
+                        { id: 'gatling', name: '⚡ 黃金加特林', damage: 65, fireRate: 90, color: 0xf59e0b },
+                        { id: 'bazooka', name: '🚀 核爆火箭筒', damage: 350, fireRate: 1100, color: 0xef4444 },
+                        { id: 'dice', name: '🎲 量子骰子槍', damage: 120, fireRate: 250, color: 0xa855f7 },
+                        { id: 'pulse', name: '💥 毀滅脈衝砲', damage: 200, fireRate: 500, color: 0x3b82f6 }
+                    ];
+                    currentWeapon = weapons[Math.floor(Math.random() * weapons.length)];
+                    updateWeaponModel();
+                    showPopup(`解鎖神武：${currentWeapon.name}！`);
+                } else { showPopup('籌碼不足 ($500)'); }
+            }
+        }
+
+        function spinRouletteMachine() {
+            if (camera.position.distanceTo(rouletteMachine.position) < 4.5) {
+                if (chips >= 300) {
+                    chips -= 300;
+                    playSound(400, 0.6, 'sine');
+                    const outcomes = [
+                        { t: '☢️ 觸發全場核爆清場！', act: () => { zombies.forEach(z => scene.remove(z)); zombies = []; checkWaveClear(); } },
+                        { t: '🛡️ 獲得 10 秒無敵護盾！', act: () => { isShielded = true; clearTimeout(shieldTimer); shieldTimer = setTimeout(() => isShielded = false, 10000); } },
+                        { t: '💰 歐皇降臨！獲得 $2,000！', act: () => { chips += 2000; } },
+                        { t: '❤️ 體力完全恢復！', act: () => { hp = 100; } },
+                        { t: '💀 倒楣！籌碼被偷光光！', act: () => { chips = 0; } }
+                    ];
+                    const res = outcomes[Math.floor(Math.random() * outcomes.length)];
+                    showPopup(res.t);
+                    res.act();
+                } else { showPopup('籌碼不足 ($300)'); }
+            }
+        }
+
+        function spawnZombies() {
+            const count = wave * 4 + 2;
+            document.getElementById('zombies-left').innerText = count;
+
+            for (let i = 0; i < count; i++) {
+                const creeperGroup = new THREE.Group();
+
+                const bodyMesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.8, 1.4, 0.6),
+                    new THREE.MeshStandardMaterial({ color: 0x48b848, roughness: 0.8 })
+                );
+                bodyMesh.position.y = 0.7;
+                creeperGroup.add(bodyMesh);
+
+                const headMat = new THREE.MeshStandardMaterial({ map: creeperTexture, roughness: 0.8 });
+                const headMesh = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.9), headMat);
+                headMesh.position.y = 1.8;
+                creeperGroup.add(headMesh);
+
+                const angle = Math.random() * Math.PI * 2;
+                const r = 30 + Math.random() * 20;
+                creeperGroup.position.set(camera.position.x + Math.cos(angle) * r, 0, camera.position.z + Math.sin(angle) * r);
+
+                creeperGroup.hp = 60 + wave * 20;
+                zombies.push(creeperGroup);
+                scene.add(creeperGroup);
+            }
+        }
+
+        // 血量低於 30 時生成「紅色愛心」補血包
+        function checkAndSpawnMedKit() {
+            if (hp < 30 && !medKit && zombies.length > 0) {
+                const heartGroup = new THREE.Group();
+                const heartMat = new THREE.MeshStandardMaterial({ color: 0xef4444, emissive: 0x991b1b, roughness: 0.2 });
+
+                // 用兩個球體與一個旋轉方塊拼湊成立體愛心造型
+                const lSphere = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 16), heartMat);
+                lSphere.position.set(-0.3, 0.3, 0);
+                const rSphere = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 16), heartMat);
+                rSphere.position.set(0.3, 0.3, 0);
+                const botCone = new THREE.Mesh(new THREE.ConeGeometry(0.7, 1.0, 16), heartMat);
+                botCone.rotation.z = Math.PI;
+                botCone.position.set(0, -0.3, 0);
+
+                heartGroup.add(lSphere);
+                heartGroup.add(rSphere);
+                heartGroup.add(botCone);
+
+                const rx = (Math.random() - 0.5) * 40;
+                const rz = (Math.random() - 0.5) * 40;
+                heartGroup.position.set(rx, 1.0, rz);
+
+                scene.add(heartGroup);
+                medKit = heartGroup;
+                showPopup('❤️ 紅色愛心補血包已在地圖中降落！');
+            }
+        }
+
+        function checkWaveClear() {
+            if (isWaveTransitioning) return;
+            isWaveTransitioning = true;
+
+            const countdownEl = document.getElementById('wave-countdown');
+            const countdownSec = document.getElementById('countdown-sec');
+            countdownEl.classList.remove('hidden');
+
+            let timeLeft = 3;
+            countdownSec.innerText = timeLeft;
+
+            const timer = setInterval(() => {
+                timeLeft--;
+                if (timeLeft > 0) {
+                    countdownSec.innerText = timeLeft;
+                    playSound(600, 0.15, 'sine');
+                } else {
+                    clearInterval(timer);
+                    countdownEl.classList.add('hidden');
+                    wave++;
+                    showPopup(`WAVE ${wave} 降臨！`);
+                    spawnZombies();
+                    isWaveTransitioning = false;
+                }
+            }, 1000);
+        }
+
+        function resolveCollisions(oldPos) {
+            const playerRadius = 0.8;
+            const mapLimit = 58;
+            if (camera.position.x < -mapLimit) camera.position.x = -mapLimit;
+            if (camera.position.x > mapLimit) camera.position.x = mapLimit;
+            if (camera.position.z < -mapLimit) camera.position.z = -mapLimit;
+            if (camera.position.z > mapLimit) camera.position.z = mapLimit;
+
+            for (let obs of obstacles) {
+                if (obs === obstacles[0] || obs === obstacles[1] || obs === obstacles[2] || obs === obstacles[3]) continue;
+                const box = new THREE.Box3().setFromObject(obs);
+                box.min.subScalar(playerRadius);
+                box.max.addScalar(playerRadius);
+
+                if (box.containsPoint(camera.position)) {
+                    camera.position.copy(oldPos);
+                    break;
+                }
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = performance.now();
+            const delta = (time - prevTime) / 1000;
+            prevTime = time;
+
+            if (controlsEnabled) {
+                velocity.x -= velocity.x * 10 * delta;
+                velocity.z -= velocity.z * 10 * delta;
+                velocity.y -= 9.8 * 25 * delta;
+
+                direction.z = Number(moveForward) - Number(moveBackward);
+                direction.x = Number(moveRight) - Number(moveLeft);
+                direction.normalize();
+
+                const spd = isSprinting ? 85 : 48;
+                if (moveForward || moveBackward) velocity.z -= direction.z * spd * delta;
+                if (moveLeft || moveRight) velocity.x -= direction.x * spd * delta;
+
+                const oldPos = camera.position.clone();
+
+                camera.translateX(-velocity.x * delta);
+                camera.translateZ(velocity.z * delta);
+                camera.position.y += velocity.y * delta;
+
+                if (camera.position.y < 1.7) {
+                    velocity.y = 0;
+                    camera.position.y = 1.7;
+                    canJump = true;
+                }
+
+                resolveCollisions(oldPos);
+
+                checkAndSpawnMedKit();
+
+                // 檢測玩家是否撿到紅色愛心補血包
+                if (medKit) {
+                    medKit.rotation.y += delta * 2; // 愛心旋轉特效
+                    if (camera.position.distanceTo(medKit.position) < 2.2) {
+                        hp = Math.min(100, hp + 50);
+                        playSound(900, 0.4, 'sine');
+                        showPopup('💖 成功拾取愛心補血包 (+50 HP)！');
+                        scene.remove(medKit);
+                        medKit = null;
+                    }
+                }
+
+                if (weaponModel) {
+                    weaponModel.position.z = THREE.MathUtils.lerp(weaponModel.position.z, 0, delta * 10);
+                    if (weaponRecoil > 0) {
+                        weaponModel.position.z += weaponRecoil;
+                        weaponRecoil = 0;
+                    }
+                }
+
+                const nearBox = camera.position.distanceTo(mysteryBox.position) < 4.5;
+                const nearRoulette = camera.position.distanceTo(rouletteMachine.position) < 4.5;
+                document.getElementById('msg-box').classList.toggle('hidden', !(nearBox || nearRoulette));
+
+                for (let i = bullets.length - 1; i >= 0; i--) {
+                    const b = bullets[i];
+                    b.position.add(b.velocity);
+                    b.life += delta;
+
+                    for (let j = zombies.length - 1; j >= 0; j--) {
+                        const z = zombies[j];
+                        const zCenter = z.position.clone().add(new THREE.Vector3(0, 1.0, 0));
+
+                        if (b.position.distanceTo(zCenter) < 1.8) {
+                            z.hp -= b.damage;
+                            playSound(700, 0.1, 'sine');
+
+                            z.children.forEach(child => {
+                                if (child.material) {
+                                    child.material.color.setHex(0xff0000);
+                                    setTimeout(() => child.material.color.setHex(0x48b848), 100);
+                                }
+                            });
+
+                            if (z.hp <= 0) {
+                                scene.remove(z);
+                                zombies.splice(j, 1);
+                                kills++;
+                                combo++;
+                                chips += 80 * combo;
+                                document.getElementById('zombies-left').innerText = zombies.length;
+                                if (zombies.length === 0) checkWaveClear();
+                            }
+
+                            scene.remove(b);
+                            bullets.splice(i, 1);
+                            break;
+                        }
+                    }
+
+                    if (b.life > 2.0 && bullets[i]) {
+                        scene.remove(b);
+                        bullets.splice(i, 1);
+                    }
+                }
+
+                for (let z of zombies) {
+                    const dir = new THREE.Vector3().subVectors(camera.position, z.position);
+                    dir.y = 0; dir.normalize();
+                    z.position.add(dir.multiplyScalar(2.2 * delta));
+                    z.lookAt(camera.position.x, 0, camera.position.z);
+
+                    if (z.position.distanceTo(camera.position) < 1.8 && !isShielded) {
+                        hp -= 25 * delta;
+                        playSound(120, 0.2, 'sawtooth', 0.25);
+                        document.body.classList.add('flash-red');
+                        setTimeout(() => document.body.classList.remove('flash-red'), 300);
+                        if (hp <= 0) gameOver();
+                    }
+                }
+
+                updateHUD();
+            }
+            renderer.render(scene, camera);
+        }
+
+        function updateHUD() {
+            document.getElementById('hp-text').innerText = `${Math.max(0, Math.floor(hp))} / 100`;
+            document.getElementById('chips-text').innerText = `$${chips.toLocaleString()}`;
+            document.getElementById('weapon-text').innerText = currentWeapon.name;
+            document.getElementById('combo-text').innerText = `${combo} COMBO`;
+            document.getElementById('zombies-left').innerText = zombies.length;
+        }
+
+        function gameOver() {
+            document.exitPointerLock();
+            document.getElementById('game-over-stats').classList.remove('hidden');
+            document.getElementById('final-wave').innerText = wave;
+            document.getElementById('final-kills').innerText = kills;
+
+            hp = 100; chips = 1000; wave = 1; kills = 0; combo = 0;
+            currentWeapon = { id: 'pistol', name: '🎲 命運手槍', damage: 35, fireRate: 300, color: 0x00ffcc };
+            updateWeaponModel();
+            if (medKit) { scene.remove(medKit); medKit = null; }
+            isWaveTransitioning = false;
+            zombies.forEach(z => scene.remove(z));
+            zombies = [];
+            resetPlayerPosition();
+
+            isShielded = true;
+            setTimeout(() => { isShielded = false; }, 3000);
+
+            spawnZombies();
+        }
+
+        init();
+        spawnZombies();
+        animate();
+    </script>
+</body>
+
+</html>
